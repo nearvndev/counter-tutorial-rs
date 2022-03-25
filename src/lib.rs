@@ -1,6 +1,11 @@
 // Counter smart contract workshop
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{near_bindgen, AccountId};
+use near_sdk::{near_bindgen, AccountId, env};
+
+#[derive(BorshDeserialize, BorshSerialize, Default)]
+struct OldCounter {
+    value: u8
+}
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, Default)]
@@ -32,6 +37,14 @@ impl Counter {
 
     pub fn increment(&mut self) {
         self.value += 1;
+    }
+
+    #[init(ignore_state)]
+    #[private]
+    pub fn migrate() -> Self {
+        let old_counter: OldCounter = env::state_read().expect("Can not read state");
+
+        Counter { value: old_counter.value, new_value: 0 }
     }
 }
 
@@ -85,5 +98,3 @@ mod tests {
         assert_eq!(2, number_after_increment, "Expected after increment should be 2");
     }
   }
-
-

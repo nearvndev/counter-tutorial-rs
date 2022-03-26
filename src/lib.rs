@@ -1,17 +1,83 @@
 // Counter smart contract workshop
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{near_bindgen, AccountId, env};
+use near_sdk::collections::LookupMap;
+use near_sdk::serde::{Serialize, Deserialize};
+use near_sdk::{near_bindgen, AccountId, env, BorshStorageKey, PanicOnDefault, BlockHeight};
 
 #[derive(BorshDeserialize, BorshSerialize, Default)]
-struct OldCounter {
-    value: u8
+pub struct OldCounter {
+    value: u8,
+    new_value: u8
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Default, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct AccountV1 {
+    vote: u8,
+    balance: u8
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Default, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct AccountV2 {
+    vote: u8,
+    balance: u8,
+    bio: String
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Default, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct Account {
+    vote: u8,
+    balance: u8,
+    bio: String,
+    last_change: BlockHeight
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub enum VersionedAccount {
+    V1(AccountV1),
+    V2(AccountV2),
+    Current(Account)
+}
+
+impl From<VersionedAccount> for Account {
+    fn from(account: VersionedAccount) -> Self {
+        match account {
+            VersionedAccount::Current(account) => account,
+            VersionedAccount::V1(v1) => Account {
+                vote: v1.vote,
+                balance: v1.balance,
+                bio: String::from("migrate bio"),
+                last_change: 0
+            },
+            VersionedAccount::V2(v2) => Account {
+                vote: v2.vote,
+                balance: v2.balance,
+                bio: v2.bio,
+                last_change: 0
+            }
+        }
+    }
+}
+
+impl From<Account> for VersionedAccount {
+    fn from(account: Account) -> Self {
+        VersionedAccount::Current(account)
+    }
 }
 
 #[near_bindgen]
-#[derive(BorshDeserialize, BorshSerialize, Default)]
-struct Counter {
+#[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
+pub struct Counter {
     value: u8,
-    new_value: u8
+    new_value: u8,
+    accounts: LookupMap<AccountId, VersionedAccount>
+}
+
+#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey)]
+pub enum StorageKey {
+    AccountKey
 }
 
 #[near_bindgen]
@@ -19,7 +85,11 @@ impl Counter {
 
     #[init]
     pub fn new() -> Self {
-        Counter::default()
+        Counter { 
+            value: 0, 
+            new_value: 0,
+            accounts: LookupMap::new(StorageKey::AccountKey)
+        }
     }
 
     pub fn get_num(&self) -> u8 {
@@ -39,12 +109,32 @@ impl Counter {
         self.value += 1;
     }
 
+    pub fn get_account(&self, account_id: AccountId) -> Account {
+        let v_account = self.accounts.get(&account_id).unwrap();
+
+        Account::from(v_account)
+    }
+
+    pub fn add_account(&mut self) {
+        let v_account = self.accounts.get(&env::predecessor_account_id());
+
+        if v_account.is_none() {
+            let account = Account::default();
+            let v_account = VersionedAccount::from(account);
+            self.accounts.insert(&env::predecessor_account_id(), &v_account);
+        }
+    }
+
     #[init(ignore_state)]
     #[private]
     pub fn migrate() -> Self {
         let old_counter: OldCounter = env::state_read().expect("Can not read state");
 
-        Counter { value: old_counter.value, new_value: 0 }
+        Counter { 
+            value: old_counter.value, 
+            new_value: 0,
+            accounts: LookupMap::new(StorageKey::AccountKey)
+        }
     }
 }
 
